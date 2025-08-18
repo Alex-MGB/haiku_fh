@@ -1,7 +1,7 @@
 use thiserror::Error;
 use haiku_common::shm_accessor::market_data_type::OrderbookData;
 use crate::parsing::parsing_fast_orderbook::OrderbookUpdateDataRaw;
-use crate::parsing::parsing_orderbook::{OrderbookAction, OrderbookLevel, OrderbookSnapshotMessage};
+use crate::parsing::parsing_orderbook::{OrderbookAction, OrderbookLevel};
 
 #[derive(Debug, Error)]
 pub enum OrderbookError {
@@ -23,7 +23,6 @@ struct PriceLevel {
 
 #[derive(Debug, Clone)]
 pub struct OrderbookManagerV2 {
-    instrument: String,
     bids: [PriceLevel; 15], // small buffer if we need to delete some quote which are in our orderbook
     bid_count: u8,
     asks: [PriceLevel; 15],
@@ -32,9 +31,8 @@ pub struct OrderbookManagerV2 {
 }
 
 impl OrderbookManagerV2 {
-    pub fn new(instrument: String, _max_depth: usize) -> Self {
+    pub fn new(_max_depth: usize) -> Self {
         Self {
-            instrument,
             bids: [PriceLevel { price: 0.0, size: 0.0 }; 15],
             bid_count: 0,
             asks: [PriceLevel { price: 0.0, size: 0.0 }; 15],
@@ -50,21 +48,19 @@ impl OrderbookManagerV2 {
         }
 
         if is_bid && price > levels[0].price {
-            return Err(0); // Insert at front, becomes new best bid
+            return Err(0);
         }
         if !is_bid && price < levels[0].price {
-            return Err(0); // Insert at front, becomes new best ask
+            return Err(0);
         }
 
         let slice = &levels[..count as usize];
         if is_bid {
-            // Bids sorted descending
             match slice.binary_search_by(|level| price.partial_cmp(&level.price).unwrap()) {
                 Ok(i) => Ok(i),
                 Err(i) => Err(i),
             }
         } else {
-            // Asks sorted ascending
             match slice.binary_search_by(|level| level.price.partial_cmp(&price).unwrap()) {
                 Ok(i) => Ok(i),
                 Err(i) => Err(i),
@@ -72,21 +68,18 @@ impl OrderbookManagerV2 {
         }
     }
 
+    // Non binary way, to check which one is the best as the array are small
     #[inline(always)]
     fn find_price_index(levels: &[PriceLevel], count: u8, price: f32, is_bid: bool) -> Result<usize, usize> {
         if count == 0 {
             return Err(0);
         }
-
-        // Fast path: check if this becomes new best bid/ask
         if is_bid && price > levels[0].price {
-            return Err(0); // Insert at front, becomes new best bid
+            return Err(0);
         }
         if !is_bid && price < levels[0].price {
-            return Err(0); // Insert at front, becomes new best ask
+            return Err(0);
         }
-
-        // Check exact match at best price
         if price == levels[0].price {
             return Ok(0);
         }
@@ -124,9 +117,6 @@ impl OrderbookManagerV2 {
                     received: update.prev_change_id,
                 });
             }
-
-
-        // Process bid updates
         for action in update.bid_updates {
 
                 Self::apply_level_update(
@@ -137,8 +127,6 @@ impl OrderbookManagerV2 {
                 )?;
 
         }
-
-        // Process ask updates
         for action in update.ask_updates {
 
                 Self::apply_level_update(
@@ -240,14 +228,12 @@ impl OrderbookManagerV2 {
             ask_sizes: [0.0; 10],
         };
 
-        // Copy top 10 bid levels only
         let bid_levels = std::cmp::min(10, self.bid_count as usize);
         for i in 0..bid_levels {
             ob_data.bid_prices[i] = self.bids[i].price;
             ob_data.bid_sizes[i] = self.bids[i].size;
         }
 
-        // Copy top 10 ask levels only
         let ask_levels = std::cmp::min(10, self.ask_count as usize);
         for i in 0..ask_levels {
             ob_data.ask_prices[i] = self.asks[i].price;

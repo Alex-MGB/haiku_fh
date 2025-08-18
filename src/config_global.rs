@@ -1,7 +1,6 @@
 use serde::Deserialize;
-use config::{Config as ConfigLoader, ConfigError, File, Environment};
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct DeribitConfig {
     pub url: String,
     pub key: String,
@@ -9,19 +8,22 @@ pub struct DeribitConfig {
     pub channels: Vec<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct Config {
-    pub deribit: DeribitConfig,
+    pub url: String,
+    pub key: String,
+    pub secret: String,
+    pub channels: Vec<String>,
+    pub log_path: String,
+    pub meta_data_path: String,
 }
 
 impl Config {
 
-    pub fn load() -> Result<Self, ConfigError> {
-        let builder = ConfigLoader::builder()
-            // The following lines need obvisoulsy to be replaced in prod
-            .add_source(File::with_name("config_example").required(false))
-            .add_source(Environment::with_prefix("DERIBIT").separator("__"));
-        let cfg = builder.build()?;
-        cfg.try_deserialize::<Self>()
+    pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let content = std::fs::read_to_string(path)?;
+        let cfg_data = serde_json::from_str(&content)?;
+
+        Ok(cfg_data)
     }
 }

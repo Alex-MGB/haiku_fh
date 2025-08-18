@@ -1,9 +1,7 @@
 use crate::parsing::ParseError;
-use crate::parsing::parsing_orderbook::{OrderbookAction, OrderbookLevel, OrderbookSnapshotParams};
 use haiku_common::shm_accessor::market_data_type::TradeEvent;
 use smallvec::SmallVec;
 use std::collections::HashMap;
-use serde::Deserialize;
 use crate::parsing::parsing_fast_orderbook::OrderbookResult;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,7 +12,6 @@ pub enum ChannelType {
     Unknown = 2,
 }
 
-// #[derive(Debug)]
 pub enum FastMarketData {
     Trade(SmallVec<[TradeEvent; 4]>),
     OrderbookUpdate(OrderbookResult)
@@ -36,6 +33,7 @@ pub struct StreamingParser {
     pub(crate) instrument_map: HashMap<String, usize>,
 }
 
+// This need refactoring if it goes in prod, as the code is a bit disgusting and not readable
 impl StreamingParser {
     const SUBSCRIPTION_PREFIX: &'static [u8] =
         br#"{"jsonrpc":"2.0","method":"subscription","params":{""#;
@@ -51,7 +49,7 @@ impl StreamingParser {
         // Skip common prefix: {'jsonrpc': '2.0', 'method': 'subscription', 'params': {'
         let channel_type = self.detect_channel_type_fast(buffer)?;
         match channel_type {
-            ChannelType::Trades => Ok(Some(FastMarketData::Trade(self.parse_trade_direct(buffer)?))),
+            ChannelType::Trades => Ok(Some(FastMarketData::Trade(self.parse_trade_fast(buffer)?))),
             ChannelType::Orderbook => Ok(Some(FastMarketData::OrderbookUpdate(self.parse_orderbook_fast(buffer)?))),
             ChannelType::Unknown => Ok(None),
         }
@@ -72,7 +70,7 @@ impl StreamingParser {
     }
 
     #[inline(never)]
-    pub fn parse_trade_direct(&self, buffer: &[u8]) -> Result<SmallVec<[TradeEvent; 4]>, ParseError> {
+    pub fn parse_trade_fast(&self, buffer: &[u8]) -> Result<SmallVec<[TradeEvent; 4]>, ParseError> {
         if buffer.len() < 52 || &buffer[0..52] != Self::SUBSCRIPTION_PREFIX {
             return Err(ParseError::BufferTooShort(buffer.len().to_string()));
         }
@@ -95,7 +93,6 @@ impl StreamingParser {
                 break;
             }
             if let Some((trade, new_pos)) = self.parse_trade_object_optimized(&buffer[pos..])? {
-                println!("trade: {:?}", trade);
                 trades.push(trade);
                 original_pos += new_pos + 3;
                 pos = original_pos;
@@ -106,7 +103,6 @@ impl StreamingParser {
 
     #[inline]
     pub(crate) fn find_data_array_fast(buffer: &[u8], start: usize) -> Result<usize, ParseError> {
-        // Find data pattern after channel
         buffer[start..]
             .windows(Self::DATA_PATTERN.len())
             .position(|w| w == Self::DATA_PATTERN)
@@ -123,7 +119,6 @@ impl StreamingParser {
 
         // {=123, }=125, "=34, :=58, ,=44, '39
         let mut pos = 0;
-        // Parse in expected order for maximum speed
         pos = Self::expect_field(buffer, pos, b"timestamp")?;
         let (timestamp, new_pos) = Self::parse_u64(buffer, pos)?;
         pos = new_pos;
@@ -133,7 +128,7 @@ impl StreamingParser {
 
         pos = pos + 9;
 
-        let (price, new_pos) = Self::parse_f64_new(buffer, pos)?;
+        let (price, new_pos) = Self::parse_f64_new_new(buffer, pos)?;
         pos = new_pos + 2;
 
         if &buffer[pos..pos + 6] != b"amount" {
@@ -255,16 +250,6 @@ impl StreamingParser {
         Ok(pos + 2 + field.len())
     }
 
-    fn find_data_array_start(buffer: &[u8]) -> Result<usize, ParseError> {
-        // Find "data":[
-        let pattern = b"\"data\":[";
-        buffer
-            .windows(pattern.len())
-            .position(|w| w == pattern)
-            .map(|pos| pos + pattern.len())
-            .ok_or_else(|| ParseError::InvalidFormat("data array not found".to_string()))
-    }
-
     #[inline]
     fn skip_whitespace(buffer: &[u8], mut pos: usize) -> usize {
         while pos < buffer.len() {
@@ -276,26 +261,6 @@ impl StreamingParser {
         pos
     }
 
-    #[inline]
-    fn skip_whitespace_and_char(buffer: &[u8], pos: usize, ch: u8) -> Result<usize, ParseError> {
-        let pos = Self::skip_whitespace(buffer, pos);
-        if pos >= buffer.len() || buffer[pos] != ch {
-            return Err(ParseError::InvalidFormat("Expected char".to_string()));
-        }
-        Ok(pos + 1)
-    }
-
-    fn skip_shit(buffer: &[u8], mut pos: usize) -> usize {
-        while pos < buffer.len()
-            && matches!(
-                buffer[pos],
-                b' ' | b'\n' | b'\r' | b'\t' | b'"' | b'\'' | b':' | b','
-            )
-        {
-            pos += 1;
-        }
-        pos
-    }
 
     pub(crate) fn parse_string(buffer: &[u8], pos: usize) -> Result<(usize, usize), ParseError> {
         if pos >= buffer.len() {
@@ -306,7 +271,7 @@ impl StreamingParser {
         let mut end = start;
         while end < buffer.len() && buffer[end] != b'"' {
             if buffer[end] == b'\\' {
-                end += 2; // Skip escaped char
+                end += 2;
             } else {
                 end += 1;
             }
@@ -422,7 +387,6 @@ impl StreamingParser {
             result += (decimal_part as f64) / (10u64.pow(decimal_places) as f64);
         }
 
-        // Apply exponent
         if exponent != 0 {
             result *= 10f64.powi(exponent);
         }
@@ -443,21 +407,18 @@ impl StreamingParser {
         let mut decimal_places = 0u32;
         let mut negative = false;
 
-        // Check for negative
         if end < buffer.len() && buffer[end] == 45 {
             // '-'
             negative = true;
             end += 1;
         }
 
-        // Parse integer part
         while end < buffer.len() && buffer[end] >= 48 && buffer[end] <= 57 {
             // 0-9
             integer_part = integer_part * 10 + (buffer[end] - 48) as u64;
             end += 1;
         }
 
-        // Parse decimal part if present
         if end < buffer.len() && buffer[end] == 46 {
             // '.'
             end += 1;
@@ -472,7 +433,6 @@ impl StreamingParser {
             return Err(ParseError::InvalidFormat("Expected number".to_string()));
         }
 
-        // Combine parts
         let mut result = integer_part as f64;
         if decimal_places > 0 {
             result += (decimal_part as f64) / (10u64.pow(decimal_places) as f64);
@@ -486,60 +446,6 @@ impl StreamingParser {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//
-//     #[test]
-//     fn test_parse_f64() {
-//         let parser = StreamingParser::new(HashMap::new());
-//
-//         // Positive integer
-//         let (val, pos) = StreamingParser::parse_f64_new(b"1234", 0).unwrap();
-//         assert_eq!(val, 1234.0);
-//         assert_eq!(pos, 4);
-//
-//         // Positive decimal
-//         let (val, pos) = StreamingParser::parse_f64_new(b"123.45", 0).unwrap();
-//         assert_eq!(val, 123.45);
-//         assert_eq!(pos, 6);
-//
-//         // Negative integer
-//         let (val, pos) = StreamingParser::parse_f64_new(b"-456", 0).unwrap();
-//         assert_eq!(val, -456.0);
-//         assert_eq!(pos, 4);
-//
-//         // Negative decimal
-//         let (val, pos) = StreamingParser::parse_f64_new(b"-78.9", 0).unwrap();
-//         assert_eq!(val, -78.9);
-//         assert_eq!(pos, 5);
-//
-//         // Zero
-//         let (val, pos) = StreamingParser::parse_f64_new(b"0", 0).unwrap();
-//         assert_eq!(val, 0.0);
-//         assert_eq!(pos, 1);
-//
-//         // Decimal zero
-//         let (val, pos) = StreamingParser::parse_f64_new(b"0.0", 0).unwrap();
-//         assert_eq!(val, 0.0);
-//         assert_eq!(pos, 3);
-//
-//         // Small decimal
-//         let (val, pos) = StreamingParser::parse_f64_new(b"0.001", 0).unwrap();
-//         assert_eq!(val, 0.001);
-//         assert_eq!(pos, 5);
-//
-//         // Number followed by other chars
-//         let (val, pos) = StreamingParser::parse_f64_new(b"123.45,", 0).unwrap();
-//         assert_eq!(val, 123.45);
-//         assert_eq!(pos, 6);
-//
-//         // Error cases
-//         assert!(StreamingParser::parse_f64_new(b"", 0).is_err());
-//         assert!(StreamingParser::parse_f64_new(b"-", 0).is_err());
-//         assert!(StreamingParser::parse_f64_new(b"abc", 0).is_err());
-//     }
-// }
 
 #[cfg(test)]
 mod tests {
@@ -555,7 +461,7 @@ mod tests {
         instrument_map.insert("ETH-PERPETUAL".to_string(), 1usize);
 
         let parser = StreamingParser::new(instrument_map);
-        let trades = parser.parse_trade_direct(json_data.as_bytes()).unwrap();
+        let trades = parser.parse_trade_fast(json_data.as_bytes()).unwrap();
         // println!("Trades: {:?}", trades);
         assert_eq!(trades.len(), 2);
         let trade = &trades[0];
@@ -583,15 +489,6 @@ mod tests {
 
         let parser = StreamingParser::new(instrument_map);
         let trades = parser.parse_orderbook_fast(json_data.as_bytes()).unwrap();
-        // println!("Trades: {:?}", trades);
         assert_eq!(3, 2);
-        // let trade = &trades[0];
-        //
-        // assert_eq!(trade.instrument_idx, 1);
-        // assert_eq!(trade.price, 3652.7);
-        // assert_eq!(trade.size, 13830.0);
-        // assert_eq!(trade.side, 0); // buy
-        // assert_eq!(trade.timestamp_ns, 1753469786907);
-        // assert_eq!(trade.trade_id, 259727150); // parsed from "ETH-259123126"
     }
 }

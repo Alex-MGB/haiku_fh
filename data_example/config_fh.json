@@ -1,4 +1,24 @@
 { "url": "wss://www.deribit.com/ws/api/v2",
   "key": "your_key",
   "secret": "your_secret",
-  "channels": ["trades.ETH-PERPETUAL.raw", "book.ETH-PERPETUAL.raw", "book.DOT_USDC-PERPETUAL.raw"]}
+  "channels": [
+    "trades.ETH-PERPETUAL.raw",
+    "book.ETH-PERPETUAL.raw",
+    "trades.DOT_USDC-PERPETUAL.raw",
+    "book.DOT_USDC-PERPETUAL.raw",
+    "trades.BTC-PERPETUAL.raw",
+    "book.BTC-PERPETUAL.raw",
+    "book.SOL_USDC-PERPETUAL.raw",
+    "trades.SOL_USDC-PERPETUAL.raw",
+    "book.XRP_USDC-PERPETUAL.raw",
+    "trades.XRP_USDC-PERPETUAL.raw",
+    "book.ETH_USDC-PERPETUAL.raw",
+    "trades.ETH_USDC-PERPETUAL.raw",
+    "book.PAXG_USDC-PERPETUAL.raw",
+    "trades.PAXG_USDC-PERPETUAL.raw",
+    "book.AVAX_USDC-PERPETUAL.raw",
+    "trades.AVAX_USDC-PERPETUAL.raw"
+  ],
+  "log_path": "/home/gitgud/haikutrading/log/",
+  "meta_data_path": "/home/gitgud/haikutrading/shm/test/rust_integration.json"
+}
