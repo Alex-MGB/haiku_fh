@@ -1,0 +1,4 @@
+{ "url": "wss://www.deribit.com/ws/api/v2",
+  "key": "your_key",
+  "secret": "your_secret",
+  "channels": ["trades.ETH-PERPETUAL.raw", "book.ETH-PERPETUAL.raw", "book.DOT_USDC-PERPETUAL.raw"]}
