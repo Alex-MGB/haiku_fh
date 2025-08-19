@@ -1,0 +1,31 @@
+[package]
+name = "haiku_fh"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+futures = "0.3.31"
+serde_json = "1.0.141"
+tokio = { version = "1.36", features = ["full"] }
+tokio-tungstenite = { version = "0.21.0", features = ["rustls-tls-native-roots"] }
+tungstenite = "0.27.0"
+serde = { version = "1.0.219", features = ["derive"] }
+thiserror = "2.0.12"
+config = "0.13"
+simd-json = "0.13"
+ordered-float = "4.2"
+memmap2 = "0.9.7"
+haiku_common = { path = "../haiku_common" }
+tracing = "0.1.41"
+log = "0.4.27"
+smallvec = "1.15.1"
+serde_yaml = "0.9.34+deprecated"
+clap = { version = "4.5.41", features = ["derive"] }
+
+[dev-dependencies]
+criterion = "0.6.0"
+
+[[bench]]
+name = "parsing_perf"
+harness = false
+
