@@ -9,8 +9,7 @@
 **/target/
 
 # Cargo.lock: commit for applications, ignore for libraries
-# (uncomment if you’re building a library and don’t want to check in Cargo.lock)
-/Cargo.lock
+
 
 # ----- Executables / Artifacts -----
 # Binaries
